@@ -190,6 +190,7 @@ if __name__ == "__main__":
     env_kwargs = {}
     if is_minimujo_env(args.env_id):
         env_kwargs = asdict(args.minimujo)
+        env_kwargs['timesteps'] = args.num_steps
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, env_kwargs=env_kwargs) for i in range(args.num_envs)]
     )
