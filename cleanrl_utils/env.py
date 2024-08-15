@@ -14,7 +14,7 @@ class MinimujoEnv:
     """Whether to randomly position the walker on reset"""
     random_rotation: bool = False
     """Whether to randomly rotate the walker on reset"""
-    observation_type: str = "pos,walker"
+    observation_type: str = "pos,vel,walker"
     """What type of observation should the environment emit? Options are 'top_camera', 'walker', 'pos', 'vel', 'goal'. Can be combined as a comma seprated list (e.g. 'pos,walker')"""
     image_observation_format: str = '0-1'
     """Whether the image should be formatted in range 0-1 or 0-255"""

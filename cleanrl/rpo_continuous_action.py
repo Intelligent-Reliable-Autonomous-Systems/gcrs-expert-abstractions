@@ -11,10 +11,12 @@ import torch.nn as nn
 import torch.optim as optim
 import tyro
 from torch.distributions.normal import Normal
-from torch.utils.tensorboard import SummaryWriter
+from tensorboardX import SummaryWriter
 
 from cleanrl_utils.env import MinimujoEnv, is_minimujo_env, EpisodePadWrapper
 from cleanrl_utils.recording import RecordVideo
+from minimujo.utils.logging import LoggingWrapper, get_minimujo_heatmap_loggers
+from minimujo.state.goal_wrapper import GridPositionGoalWrapper
 
 @dataclass
 class Args:
@@ -87,7 +89,7 @@ class Args:
 
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}):
+def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None):
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array", **env_kwargs)
@@ -95,8 +97,16 @@ def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}):
         else:
             env = gym.make(env_id, **env_kwargs)
         # env = gym.wrappers.HumanRendering(env)
+        env = GridPositionGoalWrapper(env, dense=True)
+
+        if logging_params is not None:
+            env = LoggingWrapper(env, logging_params['writer'], max_timesteps=logging_params['max_steps'], standard_label=logging_params['prefix'])
+            for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
+                logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
+                env.subscribe_metric(logger)
+
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
-        env = EpisodePadWrapper(env)
+        # env = EpisodePadWrapper(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)
         # env = gym.wrappers.NormalizeObservation(env)
@@ -191,8 +201,9 @@ if __name__ == "__main__":
     if is_minimujo_env(args.env_id):
         env_kwargs = asdict(args.minimujo)
         env_kwargs['timesteps'] = args.num_steps
+        log_params = { 'writer': writer, 'max_steps': args.num_steps, 'prefix': 'minimujo' }
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, env_kwargs=env_kwargs) for i in range(args.num_envs)]
+        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, env_kwargs=env_kwargs, logging_params=log_params) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
