@@ -13,9 +13,11 @@ import tyro
 from torch.distributions.normal import Normal
 from tensorboardX import SummaryWriter
 
+from cleanrl.goal import wrap_env_with_goal
 from cleanrl_utils.env import MinimujoEnv, is_minimujo_env, EpisodePadWrapper
 from cleanrl_utils.recording import RecordVideo
 from minimujo.utils.logging import LoggingWrapper, get_minimujo_heatmap_loggers
+from minimujo.utils.logging.subgoals import SubgoalLogger
 from minimujo.state.goal_wrapper import GridPositionGoalWrapper
 
 @dataclass
@@ -24,8 +26,17 @@ class Args:
     minimujo: MinimujoEnv
     """Environment parameters for minimujo"""
 
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    goal_version: str = "dense-v0"
+    """What experimental version of the wrapper to use"""
+
+    exp_name: str = None
     """the name of this experiment"""
+    group_name: str = None,
+    """the experiment group"""
+    log_dir: str = None,
+    """the base dir where the log dir will go. default: 'runs/'"""
+    video_dir: str = None,
+    """the base dir where the video dir will go. default: 'videos/'"""
     seed: int = 1
     """seed of the experiment"""
     torch_deterministic: bool = True
@@ -89,21 +100,26 @@ class Args:
 
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None):
+def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None, video_dir=None, goal_version='dense-v1'):
+    if video_dir is None:
+        video_dir = f"videos/{run_name}"
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array", **env_kwargs)
-            env = RecordVideo(env, f"videos/{run_name}")
+            env = RecordVideo(env, video_dir)
         else:
             env = gym.make(env_id, **env_kwargs)
         # env = gym.wrappers.HumanRendering(env)
-        env = GridPositionGoalWrapper(env, dense=True)
+
+        env = wrap_env_with_goal(env, env_id, goal_version)
 
         if logging_params is not None:
             env = LoggingWrapper(env, logging_params['writer'], max_timesteps=logging_params['max_steps'], standard_label=logging_params['prefix'])
-            for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
-                logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
-                env.subscribe_metric(logger)
+            # for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
+            #     logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
+            #     env.subscribe_metric(logger)
+            subgoal = SubgoalLogger(logging_params['prefix'])
+            env.subscribe_metric(subgoal)
 
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         # env = EpisodePadWrapper(env)
@@ -169,12 +185,17 @@ if __name__ == "__main__":
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
 
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+    short_env = args.env_id.removeprefix('Minimujo-').removesuffix('-v0')
+    if args.exp_name is None:
+        run_name = f"rpo__{short_env}__{args.seed}__{int(time.time())}"
+    else:
+        run_name = args.exp_name
     if args.track:
         import wandb
 
         wandb.init(
             project=args.wandb_project_name,
+            group=args.group_name,
             entity=args.wandb_entity,
             sync_tensorboard=True,
             config=vars(args),
@@ -182,7 +203,19 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    writer = SummaryWriter(f"runs/{run_name}")
+    group_subdir = f'/{args.group_name}' if args.group_name is not None else ''
+    if args.log_dir is None:
+        log_base_dir = f'runs{group_subdir}'
+    else:
+        log_base_dir = args.log_dir
+    log_dir = os.path.join(log_base_dir, run_name)
+    if args.video_dir is None:
+        video_base_dir = f'videos{group_subdir}'
+    else:
+        video_base_dir = args.log_dir
+    video_dir = os.path.join(video_base_dir, run_name)
+        
+    writer = SummaryWriter(log_dir)
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -203,7 +236,7 @@ if __name__ == "__main__":
         env_kwargs['timesteps'] = args.num_steps
         log_params = { 'writer': writer, 'max_steps': args.num_steps, 'prefix': 'minimujo' }
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, env_kwargs=env_kwargs, logging_params=log_params) for i in range(args.num_envs)]
+        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, env_kwargs=env_kwargs, logging_params=log_params, video_dir=video_dir, goal_version=args.goal_version) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 

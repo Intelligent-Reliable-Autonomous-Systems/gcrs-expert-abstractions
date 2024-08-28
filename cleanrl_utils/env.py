@@ -10,6 +10,8 @@ class MinimujoEnv:
     """The type of the walker, from 'ball', 'square', 'ant', 'humanoid'"""
     xy_scale: float = 1
     """The arena scale (minimum based on walker type)"""
+    seed: int = None
+    """The seed for the arena generation"""
     random_spawn: bool = False
     """Whether to randomly position the walker on reset"""
     random_rotation: bool = False
@@ -18,8 +20,6 @@ class MinimujoEnv:
     """What type of observation should the environment emit? Options are 'top_camera', 'walker', 'pos', 'vel', 'goal'. Can be combined as a comma seprated list (e.g. 'pos,walker')"""
     image_observation_format: str = '0-1'
     """Whether the image should be formatted in range 0-1 or 0-255"""
-    reward_type: str = "sparse"
-    """What type of reward should the environment emit? Options are 'sparse', 'sparse_cost', 'subgoal', 'subgoal_cost'"""
     render_width: int = 256
     """How big should the render be?"""
 
