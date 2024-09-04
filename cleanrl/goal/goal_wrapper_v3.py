@@ -42,7 +42,7 @@ class GridPositionGoalWrapper(gym.Wrapper):
         self.prev_state = abstract_state
         self.prev_goal = goal
 
-        self.prev_dist = len(self.goal_path) + GridAbstraction.grid_distance_from_state(goal.walker_pos, abstract_state)
+        self.prev_dist = len(self.goal_path) + GridAbstraction.grid_distance_from_state(goal.walker_pos, self.env.unwrapped.state)
 
         return np.concatenate([obs, self.goal_obs_func(goal)]), info
 
@@ -54,14 +54,17 @@ class GridPositionGoalWrapper(gym.Wrapper):
         # temporarily, hard code to UMaze
         # TODO generalize planning
 
+        best_path = self.goal_seq(abstract_state)
+        new_goal = best_path[0]
         # reward for subgoals
-        goal_idx = (len(self.goal_path) - self.goal_path.index(self.prev_goal)) if self.prev_goal in self.goal_path else self.off_path_length
-        dist = GridAbstraction.grid_distance_from_state(self.prev_goal.walker_pos, curr_state)
+        # goal_idx = (len(self.goal_path) - self.goal_path.index(self.prev_goal)) if self.prev_goal in self.goal_path else self.off_path_length
+        goal_idx = len(best_path)
+        dist = GridAbstraction.grid_distance_from_state(new_goal.walker_pos, curr_state)
         total_dist = goal_idx + dist
-        rew = -(total_dist - self.prev_dist)
+        rew = self.prev_dist - total_dist
+        self.prev_dist = total_dist
 
 
-        new_goal = self.goal_seq(abstract_state)[0]
         self.prev_state = abstract_state
         self.prev_goal = new_goal
 
