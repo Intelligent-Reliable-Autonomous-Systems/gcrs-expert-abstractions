@@ -49,6 +49,8 @@ class Args:
     """the wandb's project name"""
     wandb_entity: str = None
     """the entity (team) of wandb's project"""
+    wandb_tags: str = ""
+    """Tags to be added to wandb"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
 
@@ -199,6 +201,7 @@ if __name__ == "__main__":
             entity=args.wandb_entity,
             sync_tensorboard=True,
             config=vars(args),
+            tags=args.wandb_tags.split(','),
             name=run_name,
             monitor_gym=True,
             save_code=True,
