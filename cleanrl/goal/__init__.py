@@ -1,4 +1,6 @@
 def wrap_env_with_goal(env, env_id, goal_version):
+    if goal_version == 'no-goal':
+        return env
     if goal_version == 'dense-v0':
         from cleanrl.goal.goal_wrapper_v0 import GridPositionGoalWrapper
         return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
@@ -10,6 +12,9 @@ def wrap_env_with_goal(env, env_id, goal_version):
         return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
     elif goal_version == 'dense-v3':
         from cleanrl.goal.goal_wrapper_v3 import GridPositionGoalWrapper
+        return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
+    elif goal_version == 'final-no-reward':
+        from cleanrl.goal.final_goal_no_reward import GridPositionGoalWrapper
         return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
     raise Exception(f'goal version {goal_version} not valid')
     
