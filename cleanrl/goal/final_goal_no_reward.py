@@ -38,6 +38,7 @@ class GridPositionGoalWrapper(gym.Wrapper):
         self.goal_path = self.goal_seq(abstract_state)
         goal = self.goal_path[-1]
         self.final_goal = goal
+        self.prev_goal = goal
 
         return np.concatenate([obs, self.goal_obs_func(goal)]), info
 
@@ -50,9 +51,6 @@ class GridPositionGoalWrapper(gym.Wrapper):
         # TODO generalize planning
 
         success = abstract_state == self.final_goal
-
-        self.prev_state = abstract_state
-        self.prev_goal = new_goal
 
         info['goal'] = self.final_goal
         info['num_subgoals'] = 0 if success else 1
