@@ -8,40 +8,34 @@ if __name__ == "__main__":
     # from goal import wrap_env_with_goal
     from cleanrl.goal import wrap_env_with_goal
 
-    print_reward = True
-    print_obs = False
+    import argparse
+    from minimujo.utils.testing import add_minimujo_arguments, args_to_gym_env, get_pygame_action
+    parser = argparse.ArgumentParser()
+    add_minimujo_arguments(parser, env='Minimujo-RandomObject-v0', walker='box2d', scale=3, timesteps=600)
+    parser.add_argument("--print-reward", action="store_true", help="Print reward")
+    parser.add_argument("--print-obs", action="store_true", help="Print observation")
+    parser.add_argument("--print-goal", action="store_true", help="Print goal")
+    args = parser.parse_args()
     
-    env_id = 'Minimujo-RandomObject-v0'
-    env = gym.make(
-        env_id,
-        walker_type='box2d',
-        xy_scale=3, 
-        timesteps=600
-    )
+    env_id = args.env
+    env = args_to_gym_env(args)
     env.unwrapped.render_width = 480
     env.unwrapped.render_height = 480
+
+    from minimujo.utils.logging import LoggingWrapper, MinimujoLogger
+    from minimujo.utils.logging.tensorboard import MockSummaryWriter
+    from minimujo.utils.logging.subgoals import SubgoalLogger
+    env = LoggingWrapper(env, MockSummaryWriter(), max_timesteps=600)
+    # for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
+    #     logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
+    #     env.subscribe_metric(logger)
+    env.subscribe_metric(MinimujoLogger())
+    env.subscribe_metric(SubgoalLogger())
     
-    goal_env = wrap_env_with_goal(env, env_id, 'dense-v2')
+    goal_env = wrap_env_with_goal(env, env_id, 'final-no-reward')
     env = HumanRendering(goal_env)
 
     print('Controls: Move with WASD, grab with Space')
-
-    def get_action():
-        keys = key.get_pressed()
-        up = 0
-        right = 0
-        grab = 0
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            right += 1
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            right -= 1
-        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            up -= 1
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
-            up += 1
-        if keys[pygame.K_n] or keys[pygame.K_SPACE]:
-            grab = 1
-        return np.array([grab, -up, right])
 
     obs, _ = env.reset()
 
@@ -65,20 +59,22 @@ if __name__ == "__main__":
             if not keys[pygame.K_r]:
                 is_holding_reset = False
             action = env.unwrapped.action_space.sample()
-            manual_action = get_action()
+            manual_action = get_pygame_action()
             action[:3] = manual_action
 
             obs, rew, term, trunc, info = env.step(action)
             reward_sum += rew
             num_steps += 1
 
-            if print_reward:
-                print('reward:', rew)
+            if args.print_reward:
+                if rew != 0:
+                    print('reward:', rew)
 
-            if print_obs:
+            if args.print_obs:
                 print('obs:', obs)
 
-            print(goal_env.prev_goal)
+            if args.print_goal:
+                print(goal_env.prev_goal)
             
         if term or trunc:
             trunc_or_term = 'Truncated' if trunc else 'Terminated'
