@@ -16,7 +16,7 @@ from tensorboardX import SummaryWriter
 from cleanrl.goal import wrap_env_with_goal
 from cleanrl_utils.env import MinimujoEnv, is_minimujo_env, EpisodePadWrapper
 from cleanrl_utils.recording import RecordVideo
-from minimujo.utils.logging import LoggingWrapper, get_minimujo_heatmap_loggers
+from minimujo.utils.logging import LoggingWrapper, get_minimujo_heatmap_loggers, MinimujoLogger
 from minimujo.utils.logging.subgoals import SubgoalLogger
 from minimujo.state.goal_wrapper import GridPositionGoalWrapper
 
@@ -104,7 +104,7 @@ class Args:
 
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None, video_dir=None, goal_version='dense-v1'):
+def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None, video_dir=None, goal_version='dense-v1', reward_scale=1, norm_obs=False, norm_reward=False):
     if video_dir is None:
         video_dir = f"videos/{run_name}"
     def thunk():
@@ -113,26 +113,31 @@ def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging
             env = RecordVideo(env, video_dir)
         else:
             env = gym.make(env_id, **env_kwargs)
-        # env = gym.wrappers.HumanRendering(env)
 
         env = wrap_env_with_goal(env, env_id, goal_version)
+        
+        env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.ClipAction(env)
+
+        if norm_obs:
+            env = gym.wrappers.NormalizeObservation(env)
+            env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
+
+        if norm_reward:
+            env = gym.wrappers.NormalizeReward(env, gamma=gamma)
+            env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        elif reward_scale != 1:
+            env = gym.wrappers.TransformReward(env, lambda r: r * reward_scale)
 
         if logging_params is not None:
             env = LoggingWrapper(env, logging_params['writer'], max_timesteps=logging_params['max_steps'], standard_label=logging_params['prefix'])
             # for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
             #     logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
             #     env.subscribe_metric(logger)
-            subgoal = SubgoalLogger(logging_params['prefix'])
-            env.subscribe_metric(subgoal)
-
-        env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
-        # env = EpisodePadWrapper(env)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.ClipAction(env)
-        # env = gym.wrappers.NormalizeObservation(env)
-        # env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
-        # env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        # env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+            prefix = logging_params['prefix']
+            env.subscribe_metric(MinimujoLogger(prefix))
+            env.subscribe_metric(SubgoalLogger(prefix))
         return env
 
     return thunk
@@ -217,7 +222,7 @@ if __name__ == "__main__":
     if args.video_dir is None:
         video_base_dir = f'videos{group_subdir}'
     else:
-        video_base_dir = args.log_dir
+        video_base_dir = args.video_dir
     video_dir = os.path.join(video_base_dir, run_name)
         
     writer = SummaryWriter(log_dir)
@@ -241,7 +246,17 @@ if __name__ == "__main__":
         env_kwargs['timesteps'] = args.num_steps
         log_params = { 'writer': writer, 'max_steps': args.num_steps, 'prefix': 'minimujo' }
     envs = gym.vector.SyncVectorEnv(
-        [make_env(args.env_id, i, args.capture_video, run_name, args.gamma, env_kwargs=env_kwargs, logging_params=log_params, video_dir=video_dir, goal_version=args.goal_version) for i in range(args.num_envs)]
+        [make_env(
+            args.env_id, i, 
+            args.capture_video, 
+            run_name, 
+            args.gamma, 
+            env_kwargs=env_kwargs, 
+            logging_params=log_params, 
+            video_dir=video_dir, 
+            goal_version=args.goal_version,
+            reward_scale=args.reward_scale
+        ) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
@@ -285,7 +300,6 @@ if __name__ == "__main__":
 
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
-            reward = reward * args.reward_scale
             done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
