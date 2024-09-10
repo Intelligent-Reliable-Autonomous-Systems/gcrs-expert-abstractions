@@ -23,18 +23,19 @@ if __name__ == "__main__":
     env.unwrapped.render_width = 480
     env.unwrapped.render_height = 480
 
+    goal_env = wrap_env_with_goal(env, env_id, args.goal)
+
     from minimujo.utils.logging import LoggingWrapper, MinimujoLogger
     from minimujo.utils.logging.tensorboard import MockSummaryWriter
     from minimujo.utils.logging.subgoals import SubgoalLogger
-    env = LoggingWrapper(env, MockSummaryWriter(), max_timesteps=600)
+    env = LoggingWrapper(goal_env, MockSummaryWriter(), max_timesteps=600)
     # for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
     #     logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
     #     env.subscribe_metric(logger)
     env.subscribe_metric(MinimujoLogger())
     env.subscribe_metric(SubgoalLogger())
     
-    goal_env = wrap_env_with_goal(env, env_id, args.goal)
-    env = HumanRendering(goal_env)
+    env = HumanRendering(env)
 
     print('Controls: Move with WASD, grab with Space')
 
