@@ -12,6 +12,7 @@ if __name__ == "__main__":
     from minimujo.utils.testing import add_minimujo_arguments, args_to_gym_env, get_pygame_action
     parser = argparse.ArgumentParser()
     add_minimujo_arguments(parser, env='Minimujo-RandomObject-v0', walker='box2d', scale=3, timesteps=600)
+    parser.add_argument("--goal", "-g", type=str, default="goal-v0", help="Goal wrapper version")
     parser.add_argument("--print-reward", action="store_true", help="Print reward")
     parser.add_argument("--print-obs", action="store_true", help="Print observation")
     parser.add_argument("--print-goal", action="store_true", help="Print goal")
@@ -32,7 +33,7 @@ if __name__ == "__main__":
     env.subscribe_metric(MinimujoLogger())
     env.subscribe_metric(SubgoalLogger())
     
-    goal_env = wrap_env_with_goal(env, env_id, 'final-no-reward')
+    goal_env = wrap_env_with_goal(env, env_id, args.goal)
     env = HumanRendering(goal_env)
 
     print('Controls: Move with WASD, grab with Space')
