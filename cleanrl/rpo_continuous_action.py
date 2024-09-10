@@ -30,6 +30,7 @@ class Args:
     """What experimental version of the wrapper to use"""
     reward_scale: float = 1
     """How much to scale the reward by"""
+    reward_norm: bool = False
 
     exp_name: str = None
     """the name of this experiment"""
@@ -255,7 +256,8 @@ if __name__ == "__main__":
             logging_params=log_params, 
             video_dir=video_dir, 
             goal_version=args.goal_version,
-            reward_scale=args.reward_scale
+            reward_scale=args.reward_scale,
+            norm_reward=args.reward_norm
         ) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
