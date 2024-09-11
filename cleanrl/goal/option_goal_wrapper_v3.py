@@ -34,7 +34,8 @@ class GridPositionGoalWrapper(gym.Wrapper):
     def reset(self, *args, **kwargs) -> Tuple[Any, Dict[str, Any]]:
         obs, info = super().reset(*args, **kwargs)
 
-        abstract_state = GridAbstraction.from_minimujo_state(self.env.unwrapped.state)
+        curr_state = self.env.unwrapped.state
+        abstract_state = GridAbstraction.from_minimujo_state(curr_state)
         if self.task_getter is not None:
             self.goal_seq = self.task_getter(self.unwrapped._task, abstract_state)
         self.goal_path = self.goal_seq(abstract_state)
@@ -43,6 +44,7 @@ class GridPositionGoalWrapper(gym.Wrapper):
 
         self.prev_state = abstract_state
         self.prev_goal = goal
+        self.prev_distance = GridAbstraction.grid_distance_from_state(goal.walker_pos, curr_state)
 
         info['goal'] = goal
         info['achieved_subgoal'] = False
@@ -62,12 +64,18 @@ class GridPositionGoalWrapper(gym.Wrapper):
         goal_idx = (len(self.goal_path) - self.goal_path.index(self.prev_goal) - 1) if self.prev_goal in self.goal_path else self.off_path_length
 
         new_goal = self.goal_seq(abstract_state)[0]
-        reward = -1
+        reward = 0
+        distance = GridAbstraction.grid_distance_from_state(self.prev_goal.walker_pos, curr_state)
+        progress = self.prev_distance - distance
         if abstract_state != self.prev_state:
             if abstract_state == self.prev_goal:
-                reward = 100
+                reward = 1
             else:
-                reward = -400
+                reward = -1
+            distance = GridAbstraction.grid_distance_from_state(new_goal.walker_pos, curr_state)
+        else:
+            reward = progress
+        self.prev_distance = distance
 
         info['goal'] = new_goal
         info['achieved_subgoal'] = abstract_state == self.prev_goal

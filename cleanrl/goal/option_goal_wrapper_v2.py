@@ -62,12 +62,14 @@ class GridPositionGoalWrapper(gym.Wrapper):
         goal_idx = (len(self.goal_path) - self.goal_path.index(self.prev_goal) - 1) if self.prev_goal in self.goal_path else self.off_path_length
 
         new_goal = self.goal_seq(abstract_state)[0]
-        reward = -1
+        reward = 0
         if abstract_state != self.prev_state:
             if abstract_state == self.prev_goal:
                 reward = 100
             else:
                 reward = -400
+        else:
+            reward = -GridAbstraction.grid_distance_from_state(self.prev_goal.walker_pos, curr_state)
 
         info['goal'] = new_goal
         info['achieved_subgoal'] = abstract_state == self.prev_goal

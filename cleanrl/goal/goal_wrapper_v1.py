@@ -6,6 +6,8 @@ import gymnasium as gym
 import numpy as np
 from minimujo.state.grid_abstraction import GridAbstraction
 
+from cleanrl.goal.solver import get_randobj_goal_getter
+
 class GridPositionGoalWrapper(gym.Wrapper):
 
     def __init__(self, env: gym.Env, term_on_reach=False, dense=False, env_id='Minimujo-UMaze-v0') -> None:
@@ -15,11 +17,12 @@ class GridPositionGoalWrapper(gym.Wrapper):
             self.goal_obs_func = lambda abstract: abstract.walker_pos
             goal_low = [0,0]
             goal_high = [5,5]
-        elif env_id == 'Minimujo-RandomObject-v0':
+        elif env_id.startswith('Minimujo-RandomObject'):
+            self.task_getter = get_randobj_goal_getter
             self.goal_seq = get_randobj_goals
-            self.goal_obs_func = lambda abstract: (*abstract.walker_pos, *(abstract.objects[0][1:3]), abstract.objects[0][4])
-            goal_low = [0, 0, 0, 0, 0]
-            goal_high = [5, 5, 5, 5, 1]
+            self.goal_obs_func = lambda abstract: (*abstract.walker_pos, abstract._held_object)
+            goal_low = [0, 0, 0]
+            goal_high = [5, 5, 3]
         else:
             raise Exception(f'There is no goal specification for env {env_id}')
         self.term_on_reach = term_on_reach
@@ -35,6 +38,8 @@ class GridPositionGoalWrapper(gym.Wrapper):
         obs, info = super().reset(*args, **kwargs)
 
         abstract_state = GridAbstraction.from_minimujo_state(self.env.unwrapped.state)
+        if self.task_getter is not None:
+            self.goal_seq = self.task_getter(self.unwrapped._task, abstract_state)
         self.goal_path = self.goal_seq(abstract_state)
         self.off_path_length = len(self.goal_path) + 1
         goal = self.goal_path[0]
