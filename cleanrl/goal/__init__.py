@@ -1,34 +1,53 @@
+from minimujo.state.grid_abstraction import get_minimujo_goal_wrapper
+from minimujo_goal import *
+
+goal_wrappers = {
+    'pbrs': PBRSGoalWrapper,
+    'pbrs-dense': PBRSDenseGoalWrapper,
+    'distance-cost': DistanceCostGoalWrapper,
+    'subgoal': SubgoalGoalWrapper,
+    'subgoal-distance': SubgoalDistanceGoalWrapper,
+    'subgoal-penalty': SubgoalLargePenaltyGoalWrapper
+}
+
 def wrap_env_with_goal(env, env_id, goal_version):
     if goal_version == 'no-goal':
         return env
-    if goal_version == 'dense-v0':
-        from cleanrl.goal.goal_wrapper_v0 import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
-    elif goal_version == 'dense-v1':
-        from cleanrl.goal.goal_wrapper_v1 import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
-    elif goal_version == 'dense-v2':
-        from cleanrl.goal.goal_wrapper_v2 import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
-    elif goal_version == 'dense-v3':
-        from cleanrl.goal.goal_wrapper_v3 import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
-    elif goal_version == 'final-no-reward':
-        from cleanrl.goal.final_goal_no_reward import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
-    elif goal_version == 'option-v0':
-        from cleanrl.goal.option_goal_wrapper import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, env_id=env_id)
-    elif goal_version == 'option-v1':
-        from cleanrl.goal.option_goal_wrapper_v1 import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, env_id=env_id)
-    elif goal_version == 'option-v2':
-        from cleanrl.goal.option_goal_wrapper_v2 import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, env_id=env_id)
-    elif goal_version == 'option-v3':
-        from cleanrl.goal.option_goal_wrapper_v3 import GridPositionGoalWrapper
-        return GridPositionGoalWrapper(env, env_id=env_id)
-    raise Exception(f'goal version {goal_version} not valid')
+    
+    if 'Minimujo' in env_id:
+        if goal_version in goal_wrappers:
+            goal_cls = goal_wrappers[goal_version]
+            return get_minimujo_goal_wrapper(env, env_id, goal_cls)
+
+        # legacy wrappers
+        if goal_version == 'dense-v0':
+            from cleanrl.goal.goal_wrapper_v0 import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
+        elif goal_version == 'dense-v1':
+            from cleanrl.goal.goal_wrapper_v1 import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
+        elif goal_version == 'dense-v2':
+            from cleanrl.goal.goal_wrapper_v2 import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
+        elif goal_version == 'dense-v3':
+            from cleanrl.goal.goal_wrapper_v3 import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
+        elif goal_version == 'final-no-reward':
+            from cleanrl.goal.final_goal_no_reward import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, dense=True, env_id=env_id)
+        elif goal_version == 'option-v0':
+            from cleanrl.goal.option_goal_wrapper import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, env_id=env_id)
+        elif goal_version == 'option-v1':
+            from cleanrl.goal.option_goal_wrapper_v1 import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, env_id=env_id)
+        elif goal_version == 'option-v2':
+            from cleanrl.goal.option_goal_wrapper_v2 import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, env_id=env_id)
+        elif goal_version == 'option-v3':
+            from cleanrl.goal.option_goal_wrapper_v3 import GridPositionGoalWrapper
+            return GridPositionGoalWrapper(env, env_id=env_id)
+    raise Exception(f'goal version {goal_version} not valid in env {env_id}')
     
 if __name__ == "__main__":
     import gymnasium as gym
