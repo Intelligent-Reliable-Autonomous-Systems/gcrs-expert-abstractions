@@ -1,7 +1,8 @@
-from minimujo.state.grid_abstraction import get_minimujo_goal_wrapper
-from minimujo_goal import *
+# from minimujo.state.grid_abstraction import get_minimujo_goal_wrapper
+from cleanrl.goal.minimujo_goal import *
 
 goal_wrappers = {
+    'goal-only': GoalWrapper,
     'pbrs': PBRSGoalWrapper,
     'pbrs-dense': PBRSDenseGoalWrapper,
     'distance-cost': DistanceCostGoalWrapper,
@@ -18,6 +19,8 @@ def wrap_env_with_goal(env, env_id, goal_version):
         if goal_version in goal_wrappers:
             goal_cls = goal_wrappers[goal_version]
             return get_minimujo_goal_wrapper(env, env_id, goal_cls)
+        
+        print(f"WARNING: using legacy wrappers for goal_version {goal_version}")
 
         # legacy wrappers
         if goal_version == 'dense-v0':
@@ -47,6 +50,11 @@ def wrap_env_with_goal(env, env_id, goal_version):
         elif goal_version == 'option-v3':
             from cleanrl.goal.option_goal_wrapper_v3 import GridPositionGoalWrapper
             return GridPositionGoalWrapper(env, env_id=env_id)
+    if "manipulation" in env_id:
+        from cleanrl.goal.manipulation_goal import get_manipulator_goal_wrapper
+        if goal_version in goal_wrappers:
+            goal_cls = goal_wrappers[goal_version]
+            return get_manipulator_goal_wrapper(env, env_id, goal_cls)
     raise Exception(f'goal version {goal_version} not valid in env {env_id}')
     
 if __name__ == "__main__":

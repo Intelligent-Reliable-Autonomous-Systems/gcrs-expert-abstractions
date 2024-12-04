@@ -18,7 +18,6 @@ from cleanrl_utils.env import MinimujoEnv, is_minimujo_env, EpisodePadWrapper
 from cleanrl_utils.recording import RecordVideo
 from minimujo.utils.logging import LoggingWrapper, get_minimujo_heatmap_loggers, MinimujoLogger
 from minimujo.utils.logging.subgoals import SubgoalLogger
-from minimujo.state.goal_wrapper import GridPositionGoalWrapper
 
 @dataclass
 class Args:
@@ -305,8 +304,8 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             
             done = np.logical_or(terminations, truncations)
-            done = np.logical_or(done, infos['new_abstract_state']) # each option terminates when enter new abstract state
-            prev_goals = infos['goal']
+            if 'is_new_goal' in infos:
+                done = np.logical_or(done, infos['is_new_goal']) # each option terminates when enter new abstract state
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
             if "final_info" in infos:

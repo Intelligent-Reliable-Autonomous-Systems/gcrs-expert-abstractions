@@ -12,6 +12,7 @@ class GridPositionGoalWrapper(gym.Wrapper):
 
     def __init__(self, env: gym.Env, term_on_reach=False, dense=False, env_id='Minimujo-UMaze-v0') -> None:
         super().__init__(env)
+        self.task_getter = None
         if env_id == 'Minimujo-UMaze-v0':
             self.goal_seq = get_umaze_goals
             self.goal_obs_func = lambda abstract: abstract.walker_pos
