@@ -116,7 +116,7 @@ def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging
     if video_dir is None:
         video_dir = f"videos/{run_name}"
     video_prefix = "eval" if is_eval else "train"
-    video_trigger = (lambda ep: ep % 2 == 0) if is_eval else None
+    video_trigger = (lambda ep: ((ep in [0, 1, 2, 4, 6, 8, 12, 16, 20, 24]) or ep > 24 and (ep % 8 == 0))) if is_eval else None
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array", **env_kwargs)

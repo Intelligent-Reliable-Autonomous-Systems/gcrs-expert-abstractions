@@ -30,6 +30,11 @@ class Args:
     reward_scale: float = 1
     """How much to scale the reward by"""
     reward_norm: bool = False
+    """Whether to normalize reward"""
+    eval_interval: int = 50000
+    """How many steps in between evaluation"""
+    eval_episodes: int = 10
+    """How many episodes to run per eval"""
 
     exp_name: str = None
     """the name of this experiment"""
@@ -104,17 +109,22 @@ class Args:
 
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None, video_dir=None, goal_version='dense-v1', reward_scale=1, norm_obs=False, norm_reward=False):
+def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None, video_dir=None, 
+    goal_version='dense-v1', reward_scale=1, norm_obs=False, norm_reward=False,
+    is_eval=False
+):
     if video_dir is None:
         video_dir = f"videos/{run_name}"
+    video_prefix = "eval" if is_eval else "train"
+    video_trigger = (lambda ep: ep % 2 == 0) if is_eval else None
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array", **env_kwargs)
-            env = RecordVideo(env, video_dir)
+            env = wrap_env_with_goal(env, env_id, goal_version)
+            env = RecordVideo(env, video_dir, name_prefix=video_prefix, episode_trigger=video_trigger)
         else:
             env = gym.make(env_id, **env_kwargs)
-
-        env = wrap_env_with_goal(env, env_id, goal_version)
+            env = wrap_env_with_goal(env, env_id, goal_version)
         
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -131,7 +141,7 @@ def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging
             env = gym.wrappers.TransformReward(env, lambda r: r * reward_scale)
 
         if logging_params is not None:
-            env = LoggingWrapper(env, logging_params['writer'], max_timesteps=logging_params['max_steps'], standard_label=logging_params['prefix'])
+            env = LoggingWrapper(env, logging_params['writer'], max_timesteps=logging_params['max_steps'], standard_label=logging_params['prefix'], is_eval=is_eval)
             # for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
             #     logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
             #     env.subscribe_metric(logger)
@@ -231,6 +241,8 @@ if __name__ == "__main__":
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
+    next_eval_step = args.eval_interval
+
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -238,6 +250,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    print(f'Using device {"cuda" if torch.cuda.is_available() and args.cuda else "cpu"}', device)
 
     # env setup
     env_kwargs = {}
@@ -257,6 +270,21 @@ if __name__ == "__main__":
             goal_version=args.goal_version,
             reward_scale=args.reward_scale,
             norm_reward=args.reward_norm
+        ) for i in range(args.num_envs)]
+    )
+    eval_envs = gym.vector.SyncVectorEnv(
+        [make_env(
+            args.env_id, i, 
+            args.capture_video, 
+            run_name, 
+            args.gamma, 
+            env_kwargs={**env_kwargs, 'reset_options': {'eval': True}}, 
+            logging_params={ 'writer': writer, 'max_steps': args.num_steps, 'prefix': 'validation' }, 
+            video_dir=video_dir, 
+            goal_version=args.goal_version,
+            reward_scale=args.reward_scale,
+            norm_reward=args.reward_norm,
+            is_eval=True
         ) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
@@ -410,5 +438,36 @@ if __name__ == "__main__":
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
+        # evaluations
+        if global_step >= next_eval_step:
+            next_eval_step += args.eval_interval
+            episode_count = 0
+            step_count = 0
+            LoggingWrapper.freeze_logging() # clear out logs from unfinished episodes
+            eval_obs, _ = eval_envs.reset()
+            LoggingWrapper.resume_logging()
+            for env in eval_envs.envs:
+                env.enable_logging()
+            eval_dones = np.zeros(args.num_envs)
+            min_episodes_per_env = np.ceil(args.eval_episodes / args.num_envs)
+
+            while (dones < min_episodes_per_env).any() and step_count < args.num_steps * args.num_envs * min_episodes_per_env:
+                with torch.no_grad():
+                    eval_action, _, _, _ = agent.get_action_and_value(torch.Tensor(eval_obs).to(device))
+
+                eval_obs, _, eval_terms, eval_truncs, eval_infos = eval_envs.step(eval_action.cpu().numpy())
+                eval_dones = eval_dones + eval_terms + eval_truncs
+
+                step_count += args.num_envs
+
+                if "final_info" in eval_infos:
+                    for idx, info in enumerate(eval_infos["final_info"]):
+                        if info and "episode" in info and eval_dones[idx] < min_episodes_per_env:
+                            print(f"global_step={global_step}, envs_id={idx}, eval_count={episode_count}, episodic_return={info['episode']['r']}")
+                            episode_count += 1
+                            if eval_dones[idx] >= min_episodes_per_env:
+                                eval_envs.envs[idx].disable_logging()
+
     envs.close()
+    eval_envs.close()
     writer.close()

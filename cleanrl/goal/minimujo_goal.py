@@ -1,11 +1,11 @@
 import re
-from typing import Callable, Dict
+from typing import Callable, Dict, Type
 import minigrid.envs as envs
 from minigrid.minigrid_env import MiniGridEnv
 import numpy as np
 import gymnasium as gym
 
-from minimujo.state.goal_wrapper import GoalWrapper, AbstractState, Observation, DjikstraBackwardsPlanner, GoalObserver
+from minimujo.state.goal_wrapper import GoalWrapper, AbstractState, Observation, DjikstraBackwardsPlanner, GoalObserver, AStarPlanner
 from minimujo.state.grid_abstraction import GridAbstraction
 from minimujo.entities import get_color_id, ObjectEnum, get_color_name
 from minimujo.state.tasks import extract_feature_from_mission_text, COLOR_NAMES, OBJECT_NAMES
@@ -14,13 +14,19 @@ from minimujo.custom_minigrid import UMazeEnv, HallwayChoiceEnv, RandomCornerEnv
 from minimujo.utils.visualize.drawing import get_camera_bounds, draw_rectangle
 from minimujo.color import get_color_rgba_255
 
-def goal_task_getter(obs, abstract, _env):
-    goal_idx = np.where(abstract.grid == GridAbstraction.GRID_GOAL)
-    goal_x, goal_y = goal_idx[0][0], goal_idx[1][0]
-    return GridAbstraction(abstract.grid, (goal_x, goal_y), abstract.objects)
+def goal_task_getter(obs: Observation, abstract: GridAbstraction, env: gym.Env):
+    def eval_state(abstract: GridAbstraction):
+        grid = abstract.walker_grid_cell
+        if grid == GridAbstraction.GRID_GOAL:
+            return 1, True
+        elif grid == GridAbstraction.GRID_LAVA:
+            return -1, True
+        return 0, False
+    return eval_state
 
-def random_object_task_getter(obs, abstract, _env):
-    task = _env.unwrapped._task
+
+def random_object_task_getter(obs: Observation, abstract: GridAbstraction, env: gym.Env):
+    task = env.unwrapped._task
     pattern = r"Deliver a (\w+) (\w+) to tile \((\d+), (\d+)\)\."
     matches = re.search(pattern, task.description)
 
@@ -32,36 +38,45 @@ def random_object_task_getter(obs, abstract, _env):
     class_idx = ObjectEnum.get_id(class_name)
     x = int(matches.group(3))
     y = int(matches.group(4))
-    objects = abstract.objects.copy()
-    for idx, obj in enumerate(abstract.objects):
-        if obj[0] == class_idx and obj[3] == color_idx:
-            objects[idx] = (obj[0], x, y, obj[3], 0)
+    target_object = (class_idx, x, y, color_idx, 0)
 
-    return GridAbstraction(abstract.grid, (x, y), objects)
+    def eval_state(abstract: GridAbstraction):
+        for obj in abstract.objects:
+            if obj == target_object:
+                return 1, True
+        return 0, False
 
-def pickup_object_task_getter(obs, abstract, _env):
-    task = _env.unwrapped.task
+    return eval_state
+
+def pickup_object_task_getter(obs: Observation, abstract: GridAbstraction, env: gym.Env, strict=False):
+    task = env.unwrapped.task
     color_name = extract_feature_from_mission_text(task, COLOR_NAMES)
     color_idx = get_color_id(color_name)
     type_name = extract_feature_from_mission_text(task, OBJECT_NAMES)
     type_idx = ObjectEnum.get_id(type_name)
 
-    agent_x, agent_y = -1, -1
-    objects = abstract.objects.copy()
-    for idx, obj in enumerate(abstract.objects):
-        if obj[0] == type_idx and obj[3] == color_idx:
-            objects[idx] = (*obj[:4], 1)
-            agent_x, agent_y = obj[1], obj[2]
-    assert agent_x >= 0, f"Object {color_name} {type_name} in task could not be found"
+    def eval_state(abstract: GridAbstraction):
+        for (obj_type, _, _, color, state) in abstract.objects:
+            # if is a held object
+            if obj_type != GridAbstraction.DOOR_IDX and state == 1:
+                # if matches target
+                if color == color_idx and obj_type == type_idx:
+                    return 1, True
+                elif strict:
+                    # in strict mode, only allow picking up target
+                    return -1, True
+        return 0, False
+    return eval_state
 
-    return GridAbstraction(abstract.grid, (agent_x, agent_y), objects)
+def pickup_object_strict_task_getter(obs: Observation, abstract: GridAbstraction, env: gym.Env):
+    return pickup_object_task_getter(obs, abstract, env, strict=True)
 
 def infer_task_goal(obs, abstract, _env):
     goal_fn = MINIMUJO_ABSTRACT_GOALS[type(_env.unwrapped.minigrid.unwrapped)]
     return goal_fn(obs, abstract, _env)
 
 MINIMUJO_ABSTRACT_GOALS: Dict[MiniGridEnv, Callable] = {
-    envs.FetchEnv: pickup_object_task_getter,
+    envs.FetchEnv: pickup_object_strict_task_getter,
     envs.KeyCorridorEnv: pickup_object_task_getter,
     envs.UnlockPickupEnv: pickup_object_task_getter,
     envs.BlockedUnlockPickupEnv: pickup_object_task_getter,
@@ -81,11 +96,13 @@ MINIMUJO_ABSTRACT_GOALS: Dict[MiniGridEnv, Callable] = {
     # envs.PutNearEnv: get_put_near_task
 }
 
-def get_minimujo_goal_wrapper(env: gym.Env, env_id: str, cls=GoalWrapper):
+def get_minimujo_goal_wrapper(env: gym.Env, env_id: str, cls: Type[GoalWrapper]=GoalWrapper):
+    # abstraction function to map continuous to discrete
     def abstraction_fn(obs, _env):
         state = _env.unwrapped.state
         return GridAbstraction.from_minimujo_state(state)
-    planner = DjikstraBackwardsPlanner(GridAbstraction.backward_neighbor_edges)
+    
+    # goal observation function to map the abstracted state into a observation representation (e.g. a vector)
     def goal_obs_fn(abstract):
         held_type, held_color = -1, -1
         if abstract._held_object >= 0:
@@ -97,9 +114,29 @@ def get_minimujo_goal_wrapper(env: gym.Env, env_id: str, cls=GoalWrapper):
     high = [minigrid_env.grid.width, minigrid_env.grid.height, len(OBJECT_NAMES), len(COLOR_NAMES)]
     observer = GoalObserver(goal_obs_fn, low, high)
 
+    # get the task-specific goal function for this environment
     goal_fn = MINIMUJO_ABSTRACT_GOALS[type(minigrid_env)]
 
-    return cls(env, abstraction_fn, goal_fn, planner, observer)
+    # define the planner that plans over a network of abstract states, give a particular task
+    def task_edge_getter(obs: Observation, abstract: AbstractState, env: gym.Env):
+        eval_state = goal_fn(obs, abstract, env)
+        def get_edges(abstract: AbstractState):
+            for neighbor in abstract.get_neighbors():
+                reward, term = eval_state(neighbor)
+                if term:
+                    if reward > 0:
+                        # reached goal
+                        yield neighbor, 1, True
+                        continue
+                    elif reward < 0:
+                        # failure state
+                        yield neighbor, np.inf, False
+                        continue
+                yield neighbor, 1, False
+        return get_edges        
+    planner = AStarPlanner(task_edge_getter)
+
+    return cls(env, abstraction_fn, planner, observer)
 
 class GridGoalWrapper(GoalWrapper):
 
