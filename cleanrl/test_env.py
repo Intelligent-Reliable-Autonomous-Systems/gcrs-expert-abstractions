@@ -11,11 +11,12 @@ if __name__ == "__main__":
     import argparse
     from minimujo.utils.testing import add_minimujo_arguments, args_to_gym_env, get_pygame_action
     parser = argparse.ArgumentParser()
-    add_minimujo_arguments(parser, env='Minimujo-RandomObject-v0', walker='box2d', scale=3, timesteps=600)
+    add_minimujo_arguments(parser, env='Minimujo-RandomObject-v0', walker='box2d', scale=3, timesteps=600, include_seed=True)
     parser.add_argument("--goal", "-g", type=str, default="pbrs", help="Goal wrapper version")
     parser.add_argument("--print-reward", action="store_true", help="Print reward")
     parser.add_argument("--print-obs", action="store_true", help="Print observation")
     parser.add_argument("--print-goal", action="store_true", help="Print goal")
+    parser.add_argument("--print-abstract", action="store_true", help="Print abstract")
     args = parser.parse_args()
     
     env_id = args.env
@@ -25,21 +26,22 @@ if __name__ == "__main__":
 
     goal_env = wrap_env_with_goal(env, env_id, args.goal)
 
-    from minimujo.utils.logging import LoggingWrapper, MinimujoLogger
-    from minimujo.utils.logging.tensorboard import MockSummaryWriter
-    from minimujo.utils.logging.subgoals import SubgoalLogger
-    env = LoggingWrapper(goal_env, MockSummaryWriter(), max_timesteps=600, raise_errors=True)
+    # from minimujo.utils.logging import LoggingWrapper, MinimujoLogger
+    # from minimujo.utils.logging.tensorboard import MockSummaryWriter
+    # from minimujo.utils.logging.subgoals import SubgoalLogger
+    # env = LoggingWrapper(goal_env, MockSummaryWriter(), max_timesteps=600, raise_errors=True)
     # for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
     #     logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
     #     env.subscribe_metric(logger)
-    env.subscribe_metric(MinimujoLogger())
-    env.subscribe_metric(SubgoalLogger())
+    # env.subscribe_metric(MinimujoLogger())
+    # env.subscribe_metric(SubgoalLogger())
     
-    env = HumanRendering(env)
+    env = HumanRendering(goal_env)
 
     print('Controls: Move with WASD, grab with Space')
 
     obs, _ = env.reset()
+    # breakpoint()
 
     print(f'Env has observation space {env.unwrapped.observation_space} and action space {env.unwrapped.action_space}')
     print(f"Current task: {env.unwrapped.task}")
@@ -73,10 +75,17 @@ if __name__ == "__main__":
                     print('reward:', rew)
 
             if args.print_obs:
-                print('obs:', obs)
+                print('obs:', obs[-24:].astype(int))
+
+            # print(obs[-26:-21], obs[-21:-15], obs[-15:-10], obs[-10:-4], obs[-4:])
 
             if args.print_goal:
-                print(goal_env.prev_goal)
+                print(goal_env.subgoal)
+
+            if args.print_abstract:
+                print(goal_env.abstract_state)
+
+            # print(len(goal_env._planner.plan))
             
         if term or trunc:
             trunc_or_term = 'Truncated' if trunc else 'Terminated'

@@ -14,27 +14,22 @@ from torch.distributions.normal import Normal
 from tensorboardX import SummaryWriter
 
 from cleanrl.goal import wrap_env_with_goal
-from cleanrl_utils.env import MinimujoEnv, is_minimujo_env, EpisodePadWrapper
+from cleanrl_utils.env import ManipulationEnv, is_minimujo_env, EpisodePadWrapper
 from cleanrl_utils.recording import RecordVideo
 from minimujo.utils.logging import LoggingWrapper, get_minimujo_heatmap_loggers, MinimujoLogger
 from minimujo.utils.logging.subgoals import SubgoalLogger
+from minimujo.utils.dm_control import register_manipulation_in_gym
 
 @dataclass
 class Args:
-    # environment parameters
-    minimujo: MinimujoEnv
-    """Environment parameters for minimujo"""
+    manipulation: ManipulationEnv
+    """Arguments for manipulation"""
 
     goal_version: str = "dense-v0"
     """What experimental version of the wrapper to use"""
     reward_scale: float = 1
     """How much to scale the reward by"""
     reward_norm: bool = False
-    """Whether to normalize reward"""
-    eval_interval: int = 50000
-    """How many steps in between evaluation"""
-    eval_episodes: int = 10
-    """How many episodes to run per eval"""
 
     exp_name: str = None
     """the name of this experiment"""
@@ -98,8 +93,6 @@ class Args:
     """the target KL divergence threshold"""
     rpo_alpha: float = 0.5
     """the alpha parameter for RPO"""
-    checkpoint_freq: int = 1_000_000
-    """The number of steps between saving checkpoints"""
 
     # to be filled in runtime
     batch_size: int = 0
@@ -111,22 +104,16 @@ class Args:
 
 
 
-def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None, video_dir=None, 
-    goal_version='dense-v1', reward_scale=1, norm_obs=False, norm_reward=False,
-    is_eval=False
-):
+def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging_params=None, video_dir=None, goal_version='dense-v1', reward_scale=1, norm_obs=False, norm_reward=False):
     if video_dir is None:
         video_dir = f"videos/{run_name}"
-    video_prefix = "eval" if is_eval else "train"
-    video_trigger = (lambda ep: ((ep in [0, 1, 2, 4, 6, 8, 12, 16, 20, 24]) or ep > 24 and (ep % 8 == 0))) if is_eval else None
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array", **env_kwargs)
-            env = wrap_env_with_goal(env, env_id, goal_version, gamma)
-            env = RecordVideo(env, video_dir, name_prefix=video_prefix, episode_trigger=video_trigger)
+            env = RecordVideo(env, video_dir)
         else:
             env = gym.make(env_id, **env_kwargs)
-            env = wrap_env_with_goal(env, env_id, goal_version, gamma)
+        env = wrap_env_with_goal(env, env_id, goal_version)
         
         env = gym.wrappers.FlattenObservation(env)  # deal with dm_control's Dict observation space
         env = gym.wrappers.RecordEpisodeStatistics(env)
@@ -143,12 +130,11 @@ def make_env(env_id, idx, capture_video, run_name, gamma, env_kwargs={}, logging
             env = gym.wrappers.TransformReward(env, lambda r: r * reward_scale)
 
         if logging_params is not None:
-            env = LoggingWrapper(env, logging_params['writer'], max_timesteps=logging_params['max_steps'], standard_label=logging_params['prefix'], is_eval=is_eval)
+            env = LoggingWrapper(env, logging_params['writer'], max_timesteps=logging_params['max_steps'], standard_label=logging_params['prefix'])
             # for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
             #     logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
             #     env.subscribe_metric(logger)
             prefix = logging_params['prefix']
-            env.subscribe_metric(MinimujoLogger(prefix))
             env.subscribe_metric(SubgoalLogger(prefix))
         return env
 
@@ -206,7 +192,7 @@ if __name__ == "__main__":
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
 
-    short_env = args.env_id.removeprefix('Minimujo-').removesuffix('-v0')
+    short_env = args.env_id.removeprefix('manipulator-').removesuffix('-v0')
     if args.exp_name is None:
         run_name = f"rpo__{short_env}__{args.seed}__{int(time.time())}"
     else:
@@ -225,13 +211,14 @@ if __name__ == "__main__":
             monitor_gym=True,
             save_code=True,
         )
-    group_subdir = f'/{args.group_name}' if args.group_name is not None else ''
-    if args.log_dir is None:
+    group_subdir = f'/{args.group_name}' if isinstance(args.group_name, str) else ''
+    if not isinstance(args.log_dir, str):
         log_base_dir = f'runs{group_subdir}'
     else:
         log_base_dir = args.log_dir
+        
     log_dir = os.path.join(log_base_dir, run_name)
-    if args.video_dir is None:
+    if not isinstance(args.video_dir, str):
         video_base_dir = f'videos{group_subdir}'
     else:
         video_base_dir = args.video_dir
@@ -243,9 +230,6 @@ if __name__ == "__main__":
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
     )
 
-    next_eval_step = args.eval_interval
-    next_checkpoint_step = args.checkpoint_freq
-
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -256,11 +240,9 @@ if __name__ == "__main__":
     print(f'Using device {"cuda" if torch.cuda.is_available() and args.cuda else "cpu"}', device)
 
     # env setup
-    env_kwargs = {}
-    if is_minimujo_env(args.env_id):
-        env_kwargs = asdict(args.minimujo)
-        env_kwargs['timesteps'] = args.num_steps
-        log_params = { 'writer': writer, 'max_steps': args.num_steps, 'prefix': 'minimujo' }
+    register_manipulation_in_gym()
+    env_kwargs = asdict(args.manipulation)
+    log_params = { 'writer': writer, 'max_steps': args.num_steps, 'prefix': 'manipulator' }
     envs = gym.vector.SyncVectorEnv(
         [make_env(
             args.env_id, i, 
@@ -275,21 +257,13 @@ if __name__ == "__main__":
             norm_reward=args.reward_norm
         ) for i in range(args.num_envs)]
     )
-    eval_envs = gym.vector.SyncVectorEnv(
-        [make_env(
-            args.env_id, i, 
-            args.capture_video, 
-            run_name, 
-            args.gamma, 
-            env_kwargs={**env_kwargs, 'reset_options': {'eval': True}}, 
-            logging_params={ 'writer': writer, 'max_steps': args.num_steps, 'prefix': 'validation' }, 
-            video_dir=video_dir, 
-            goal_version=args.goal_version,
-            reward_scale=args.reward_scale,
-            norm_reward=args.reward_norm,
-            is_eval=True
-        ) for i in range(args.num_envs)]
-    )
+    is_option = args.goal_version.startswith("subgoal")
+    # print('got envs')
+    # from minimujo.utils.testing import run_gymnasium_env, capture_video_random_actions
+    # run_gymnasium_env(envs.envs[0])
+    # capture_video_random_actions(envs.envs[0], video_dir)
+    # quit()
+
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
     agent = Agent(envs, args.rpo_alpha).to(device)
@@ -333,6 +307,8 @@ if __name__ == "__main__":
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             done = np.logical_or(terminations, truncations)
+            if is_option and 'is_new_goal' in infos:
+                done = np.logical_or(done, infos['is_new_goal']) # each option terminates when enter new abstract state
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
 
@@ -438,44 +414,5 @@ if __name__ == "__main__":
         print("SPS:", int(global_step / (time.time() - start_time)))
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
-        # evaluations
-        if global_step >= next_eval_step:
-            next_eval_step += args.eval_interval
-            episode_count = 0
-            step_count = 0
-            LoggingWrapper.freeze_logging() # clear out logs from unfinished episodes
-            eval_obs, _ = eval_envs.reset()
-            LoggingWrapper.resume_logging()
-            for env in eval_envs.envs:
-                env.enable_logging()
-            eval_dones = np.zeros(args.num_envs)
-            min_episodes_per_env = np.ceil(args.eval_episodes / args.num_envs)
-
-            while (dones < min_episodes_per_env).any() and step_count < args.num_steps * args.num_envs * min_episodes_per_env:
-                with torch.no_grad():
-                    eval_action, _, _, _ = agent.get_action_and_value(torch.Tensor(eval_obs).to(device))
-
-                eval_obs, _, eval_terms, eval_truncs, eval_infos = eval_envs.step(eval_action.cpu().numpy())
-                eval_dones = eval_dones + eval_terms + eval_truncs
-
-                step_count += args.num_envs
-
-                if "final_info" in eval_infos:
-                    for idx, info in enumerate(eval_infos["final_info"]):
-                        if info and "episode" in info and eval_dones[idx] < min_episodes_per_env:
-                            print(f"global_step={global_step}, envs_id={idx}, eval_count={episode_count}, episodic_return={info['episode']['r']}")
-                            episode_count += 1
-                            if eval_dones[idx] >= min_episodes_per_env:
-                                eval_envs.envs[idx].disable_logging()
-
-        # checkpoints
-        if global_step >= next_checkpoint_step:
-            torch.save(agent.state_dict(), f'{log_dir}/checkpoint_{next_checkpoint_step}.pth')
-            next_checkpoint_step += args.checkpoint_freq
-
     envs.close()
-    eval_envs.close()
     writer.close()
-
-    # checkpoints
-    torch.save(agent.state_dict(), f'{log_dir}/final.pth')

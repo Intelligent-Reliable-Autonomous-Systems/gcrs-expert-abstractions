@@ -1,24 +1,48 @@
 # from minimujo.state.grid_abstraction import get_minimujo_goal_wrapper
 from cleanrl.goal.minimujo_goal import *
+from cleanrl.goal.object_abstraction import get_object_abstraction_goal_wrapper, PBRSObjectGoalWrapper, SubgoalObjectGoalWrapper, \
+    SubgoalLargePenaltyObjectGoalWrapper, SubgoalCostObjectGoalWrapper, SubgoalRewardOnlyObjectGoalWrapper, ObjectGoalWrapper
+from functools import partial
 
 goal_wrappers = {
     'goal-only': GoalWrapper,
     'pbrs': PBRSGoalWrapper,
     'pbrs-dense': PBRSDenseGoalWrapper,
+    'pbrs-dense-v2': PBRSDenseGoalWrapperV2,
+    'pbrs-dense-v4a': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=False),
+    'pbrs-dense-v4b': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=False),
+    'pbrs-dense-v4c': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=True),
+    'pbrs-dense-v4d': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=True),
     'distance-cost': DistanceCostGoalWrapper,
     'subgoal': SubgoalGoalWrapper,
     'subgoal-distance': SubgoalDistanceGoalWrapper,
-    'subgoal-penalty': SubgoalLargePenaltyGoalWrapper
+    'subgoal-penalty': SubgoalLargePenaltyGoalWrapper,
+    'pbrs-no-snap': PBRSGoalWrapper,
+    'subgoal-no-snap': SubgoalGoalWrapper,
 }
 
-def wrap_env_with_goal(env, env_id, goal_version):
+object_abstraction_wrappers = {
+    'object-no-rew': ObjectGoalWrapper,
+    'object-pbrs': PBRSObjectGoalWrapper,
+    'object-pbrs-one-hot': PBRSObjectGoalWrapper,
+    'object-subgoal-achieve': SubgoalObjectGoalWrapper,
+    'object-subgoal-penalty': SubgoalLargePenaltyObjectGoalWrapper,
+    'object-subgoal-cost': SubgoalCostObjectGoalWrapper,
+    'object-subgoal-rew-only': SubgoalRewardOnlyObjectGoalWrapper
+}
+
+def wrap_env_with_goal(env, env_id, goal_version, gamma=1):
     if goal_version == 'no-goal':
         return env
     
     if 'Minimujo' in env_id:
+        if goal_version in object_abstraction_wrappers:
+            goal_cls = object_abstraction_wrappers[goal_version]
+            return get_object_abstraction_goal_wrapper(env, env_id, goal_cls, gamma=gamma, one_hot=('one-hot' in goal_version))
+
         if goal_version in goal_wrappers:
             goal_cls = goal_wrappers[goal_version]
-            return get_minimujo_goal_wrapper(env, env_id, goal_cls)
+            return get_minimujo_goal_wrapper(env, env_id, goal_cls, gamma=gamma, snap_held=('no-snap' not in goal_version))
         
         print(f"WARNING: using legacy wrappers for goal_version {goal_version}")
 
