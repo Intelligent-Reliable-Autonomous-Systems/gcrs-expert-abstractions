@@ -1,3 +1,4 @@
+from functools import partial
 import re
 from typing import Callable, Dict, Type
 import gymnasium as gym
@@ -13,6 +14,7 @@ from minimujo.utils.visualize.drawing import get_camera_bounds, draw_rectangle
 from minimujo.color import get_color_rgba_255
 from minimujo.multitask import MultiTaskEnv
 from minimujo.entities import OBJECT_NAMES
+from minimujo.state.minimujo_state import MinimujoState
 import numpy as np
 import cv2
 
@@ -110,7 +112,7 @@ object_color_one_hot = np.arange(len(COLOR_TO_IDX))
 object_state_one_hot = np.arange(4)
 
 # goal observation function to map the abstracted state into a observation representation (e.g. a vector)
-def object_obs_fn(abstract: ObjectAbstraction):
+def object_obs_fn(abstract: ObjectAbstraction, env=None):
     held_idx = abstract.get_held_object()
     if held_idx == -1:
         held_type, held_color = -1, -1
@@ -121,7 +123,14 @@ def object_obs_fn(abstract: ObjectAbstraction):
         near_type, near_color, near_state = -1, -1, -1
     else:
         near_type, near_color, near_state = abstract.objects[near_idx]
-    return (held_type, held_color, near_type, near_color, near_state)
+    if env is not None:
+        if abstract._positions is not None and 0 <= near_idx < len(abstract.objects):
+            near_pos = abstract._positions[near_idx+1]
+        else:
+            near_pos = (-1, -1)
+    else:
+        near_pos = []
+    return (held_type, held_color, near_type, near_color, near_state, *near_pos)
 
 def object_obs_fn_one_hot(abstract: ObjectAbstraction):
     held_idx = abstract.get_held_object()
@@ -142,22 +151,27 @@ def object_obs_fn_one_hot(abstract: ObjectAbstraction):
         *ObservationSpecification.get_maybe_one_hot(near_state, object_state_one_hot)
     )
 
-def get_object_abstraction_goal_wrapper(env: gym.Env, env_id: str, cls: Type[GoalWrapper]=GoalWrapper, one_hot=False):
+def get_object_abstraction_goal_wrapper(env: gym.Env, env_id: str, cls: Type[GoalWrapper]=GoalWrapper, one_hot=False, use_pos=False, observe_subgoal=True):
     # abstraction function to map continuous to discrete
     def abstraction_fn(obs, _env):
         state = _env.unwrapped.state
         return ObjectAbstraction.from_minimujo_state(state)
     
     minigrid_env = env.unwrapped.minigrid
-    if one_hot:
-        obs_len = 2 * len(object_type_one_hot) + 2 * len(object_color_one_hot) + len(object_state_one_hot)
-        low = np.zeros(obs_len)
-        high = np.ones(obs_len)
-        observer = GoalObserver(object_obs_fn_one_hot, low, high)
+    if observe_subgoal:
+        if one_hot:
+            obs_len = 2 * len(object_type_one_hot) + 2 * len(object_color_one_hot) + len(object_state_one_hot)
+            low = np.zeros(obs_len)
+            high = np.ones(obs_len)
+            observer = GoalObserver(object_obs_fn_one_hot, low, high)
+        else:
+            low = [0, 0, 0, 0, 0, 0, 0]
+            high = [ObjectAbstraction.GOAL_IDX, len(COLOR_NAMES), ObjectAbstraction.GOAL_IDX, len(COLOR_NAMES), 3, minigrid_env.grid.width, minigrid_env.grid.height]
+            obs_len = 7 if use_pos else 5
+            obs_func = partial(object_obs_fn, env=env.unwrapped if use_pos else None)
+            observer = GoalObserver(obs_func, low[:obs_len], high[:obs_len])
     else:
-        low = [0, 0, 0, 0, 0]
-        high = [ObjectAbstraction.GOAL_IDX, len(COLOR_NAMES), ObjectAbstraction.GOAL_IDX, len(COLOR_NAMES), 3]
-        observer = GoalObserver(object_obs_fn, low, high)
+        observer = GoalObserver(lambda abstract: [], [], [])
 
     # get the task-specific goal function for this environment
     goal_fn = MINIMUJO_ABSTRACT_GOALS[type(minigrid_env)]
@@ -183,7 +197,20 @@ def get_object_abstraction_goal_wrapper(env: gym.Env, env_id: str, cls: Type[Goa
 
     return cls(env, abstraction_fn, planner, observer)
 
+class GoalStateObserver(GoalObserver):
+
+    def __init__(self, *args, env=None):
+        super().__init__(*args)
+        self.env = env
+
+    def observe(self, goal: AbstractState) -> np.ndarray:
+        return self.goal_observation_fn(goal, self.env)
+
 class ObjectGoalWrapper(GoalWrapper):
+
+    def __init__(self, *args, gamma=1, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gamma = gamma
 
     def render(self):
         image = super().render()

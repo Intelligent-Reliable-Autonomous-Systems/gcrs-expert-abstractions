@@ -110,23 +110,26 @@ MINIMUJO_ABSTRACT_GOALS: Dict[MiniGridEnv, Callable] = {
     # envs.PutNearEnv: get_put_near_task
 }
 
-def get_minimujo_goal_wrapper(env: gym.Env, env_id: str, cls: Type[GoalWrapper]=GoalWrapper, snap_held=True):
+def get_minimujo_goal_wrapper(env: gym.Env, env_id: str, cls: Type[GoalWrapper]=GoalWrapper, snap_held=True, observe_subgoal=True):
     # abstraction function to map continuous to discrete
     def abstraction_fn(obs, _env):
         state = _env.unwrapped.state
         return GridAbstraction.from_minimujo_state(state, snap_held_to_agent=snap_held)
     
-    # goal observation function to map the abstracted state into a observation representation (e.g. a vector)
-    def goal_obs_fn(abstract):
-        held_type, held_color = -1, -1
-        if abstract._held_object >= 0:
-            held = abstract.objects[abstract._held_object]
-            held_type, held_color = held[0], held[3]
-        return (*abstract.walker_pos, held_type, held_color)
     minigrid_env = env.unwrapped.minigrid
-    low = [0, 0, 0, 0]
-    high = [minigrid_env.grid.width, minigrid_env.grid.height, len(OBJECT_NAMES), len(COLOR_NAMES)]
-    observer = GoalObserver(goal_obs_fn, low, high)
+    # goal observation function to map the abstracted state into a observation representation (e.g. a vector)
+    if observe_subgoal:
+        def goal_obs_fn(abstract):
+            held_type, held_color = -1, -1
+            if abstract._held_object >= 0:
+                held = abstract.objects[abstract._held_object]
+                held_type, held_color = held[0], held[3]
+            return (*abstract.walker_pos, held_type, held_color)
+        low = [0, 0, 0, 0]
+        high = [minigrid_env.grid.width, minigrid_env.grid.height, len(OBJECT_NAMES), len(COLOR_NAMES)]
+        observer = GoalObserver(goal_obs_fn, low, high)
+    else:
+        observer = GoalObserver(lambda abstract: [], [], [])
 
     # get the task-specific goal function for this environment
     goal_fn = MINIMUJO_ABSTRACT_GOALS[type(minigrid_env)]
@@ -154,6 +157,10 @@ def get_minimujo_goal_wrapper(env: gym.Env, env_id: str, cls: Type[GoalWrapper]=
 
 class GridGoalWrapper(GoalWrapper):
 
+    def __init__(self, *args, gamma=1, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.gamma = gamma
+
     def render(self):
         image = super().render()
         if image is not None:
@@ -176,7 +183,12 @@ class GridGoalWrapper(GoalWrapper):
 class PBRSGoalWrapper(GridGoalWrapper):
 
     def extra_reward(self, obs: Observation, prev_abstract: AbstractState, prev_subgoal: AbstractState, prev_cost: float, term: bool) -> float:
-        return prev_cost - self._planner.cost
+        prev_potential = -prev_cost
+        new_potential = - self._planner.cost
+        # if term:
+        #     new_potential = 0
+        # return self.gamma * new_potential - prev_potential
+        return new_potential - prev_potential
     
 class PBRSDenseGoalWrapper(GridGoalWrapper):
 
@@ -215,12 +227,24 @@ class PBRSDenseGoalWrapperV2(GridGoalWrapper):
     
 class PBRSDenseGoalWrapperV4(GridGoalWrapper):
 
-    def __init__(self, *args, dist_weight=0.5, vel_weight=0.5, activate_key_reward=False, activate_pickup_reward=False, **kwargs):
+    def __init__(self, 
+                 *args, 
+                 dist_weight=0.5, 
+                 vel_weight=0.5, 
+                 activate_key_reward=False, 
+                 activate_pickup_reward=False, 
+                 linear_potential=True,
+                 zero_term_potential=True,
+                 gamma_override=1,
+                 **kwargs):
         super().__init__(*args, **kwargs)
         self.dist_weight = dist_weight
         self.vel_weight = vel_weight
         self.activate_key_reward = activate_key_reward
         self.activate_pickup_reward = activate_pickup_reward
+        self.linear_potential = linear_potential
+        self.zero_term_potential = zero_term_potential
+        self.gamma = gamma_override
 
     def reset(self, *args, **kwargs):
         output = super().reset(*args, **kwargs)
@@ -231,11 +255,19 @@ class PBRSDenseGoalWrapperV4(GridGoalWrapper):
 
     def extra_reward(self, obs: Observation, prev_abstract: AbstractState, prev_subgoal: AbstractState, prev_cost: float, term: bool) -> float:
         curr_state = self.env.unwrapped.state
-        dist = self.dense_potential(curr_state, self.abstract_state, self.subgoal)
-        total_dist = self._planner.cost + dist
-        diff = self.prev_total_dist - self.gamma * total_dist
-        self.prev_total_dist = total_dist
-        return diff
+        dist_to_subgoal = self.dense_potential(curr_state, self.abstract_state, self.subgoal)
+        new_total_dist = self._planner.cost + dist_to_subgoal
+
+        old_potential = - self.prev_total_dist
+        new_potential = - new_total_dist
+        if self.zero_term_potential and term:
+            new_potential = 0
+
+        diff_in_potential =  self.gamma * new_potential - old_potential
+
+        self.prev_total_dist = new_total_dist
+
+        return diff_in_potential
 
     def get_index_of_object_to_pick_up(self, curr_abstract: GridAbstraction, subgoal_abstract: GridAbstraction):
         for idx, ((curr_obj_type, _, _, _, curr_obj_state), (_, _, _, _, subgoal_obj_state)) in enumerate(zip(curr_abstract.objects, subgoal_abstract.objects)):
@@ -277,10 +309,16 @@ class PBRSDenseGoalWrapperV4(GridGoalWrapper):
         direction = (targ_pos - curr_pos) / dist
         velocity_in_target_direction = np.dot(curr_vel, direction)
 
-        # distance should be near 1 when far away and near 0 when close
-        distance_cost = 1 - np.exp(-2 * dist)
-        # velocity should be near 1 when moving away from target and near 0 when moving fast towards it
-        velocity_cost = min(1, np.exp(-0.9 * (velocity_in_target_direction + 1)))
+        if self.linear_potential:
+            # scale distance from maximum 1.5 to maximum 1
+            distance_cost = min(1, 0.75 * dist)
+            # scale velocity from range (-3, 3) to (0,1)
+            velocity_cost = max(0, min(1, (3-velocity_in_target_direction) / 6))
+        else:
+            # distance should be near 1 when far away and near 0 when close
+            distance_cost = 1 - np.exp(-2 * dist)
+            # velocity should be near 1 when moving away from target and near 0 when moving fast towards it
+            velocity_cost = min(1, np.exp(-0.9 * (velocity_in_target_direction + 1)))
 
         return self.dist_weight * distance_cost + self.vel_weight * velocity_cost
     

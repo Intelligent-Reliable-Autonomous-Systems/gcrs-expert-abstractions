@@ -7,12 +7,21 @@ from functools import partial
 goal_wrappers = {
     'goal-only': GoalWrapper,
     'pbrs': PBRSGoalWrapper,
+    'pbrs-no-subgoal': PBRSGoalWrapper,
     'pbrs-dense': PBRSDenseGoalWrapper,
     'pbrs-dense-v2': PBRSDenseGoalWrapperV2,
-    'pbrs-dense-v4a': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=False),
-    'pbrs-dense-v4b': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=False),
-    'pbrs-dense-v4c': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=True),
-    'pbrs-dense-v4d': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=True),
+    'pbrs-dense-v4a': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=False, linear_potential=False),
+    'pbrs-dense-v4b': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=False, linear_potential=False),
+    'pbrs-dense-v4c': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=True, linear_potential=False),
+    'pbrs-dense-v4d': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=True, linear_potential=False),
+    'pbrs-dense-v4e': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=True, linear_potential=True),
+    'pbrs-dense-v4f': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=True, linear_potential=True),
+    'pbrs-dense-v4g': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=True, linear_potential=True, zero_term_potential=False),
+    'pbrs-dense-v4h': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=True, linear_potential=True, zero_term_potential=False),
+    'pbrs-dense-v4i': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=True, linear_potential=True, zero_term_potential=False, gamma_override=1),
+    'pbrs-dense-v4j': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=True, linear_potential=True, zero_term_potential=False, gamma_override=0.999),
+    'pbrs-dense-v4k': partial(PBRSDenseGoalWrapperV4, dist_weight=1, vel_weight=0, activate_pickup_reward=True, linear_potential=True, zero_term_potential=False, gamma_override=0.95),
+    'pbrs-dense-v4l': partial(PBRSDenseGoalWrapperV4, dist_weight=0.5, vel_weight=0.5, activate_pickup_reward=True, linear_potential=True, zero_term_potential=False, gamma_override=1),
     'distance-cost': DistanceCostGoalWrapper,
     'subgoal': SubgoalGoalWrapper,
     'subgoal-distance': SubgoalDistanceGoalWrapper,
@@ -24,6 +33,8 @@ goal_wrappers = {
 object_abstraction_wrappers = {
     'object-no-rew': ObjectGoalWrapper,
     'object-pbrs': PBRSObjectGoalWrapper,
+    'object-pbrs-no-subgoal': PBRSObjectGoalWrapper,
+    'object-pos-pbrs': PBRSObjectGoalWrapper,
     'object-pbrs-one-hot': PBRSObjectGoalWrapper,
     'object-subgoal-achieve': SubgoalObjectGoalWrapper,
     'object-subgoal-penalty': SubgoalLargePenaltyObjectGoalWrapper,
@@ -38,11 +49,13 @@ def wrap_env_with_goal(env, env_id, goal_version, gamma=1):
     if 'Minimujo' in env_id:
         if goal_version in object_abstraction_wrappers:
             goal_cls = object_abstraction_wrappers[goal_version]
-            return get_object_abstraction_goal_wrapper(env, env_id, goal_cls, gamma=gamma, one_hot=('one-hot' in goal_version))
+            goal_cls = partial(goal_cls, gamma=gamma)
+            return get_object_abstraction_goal_wrapper(env, env_id, goal_cls, one_hot=('one-hot' in goal_version), use_pos=('object-pos' in goal_version), observe_subgoal=('no-subgoal' not in goal_version))
 
         if goal_version in goal_wrappers:
             goal_cls = goal_wrappers[goal_version]
-            return get_minimujo_goal_wrapper(env, env_id, goal_cls, gamma=gamma, snap_held=('no-snap' not in goal_version))
+            goal_cls = partial(goal_cls, gamma=gamma)
+            return get_minimujo_goal_wrapper(env, env_id, goal_cls, snap_held=('no-snap' not in goal_version), observe_subgoal=('no-subgoal' not in goal_version))
         
         print(f"WARNING: using legacy wrappers for goal_version {goal_version}")
 
