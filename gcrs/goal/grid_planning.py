@@ -41,6 +41,10 @@ def object_delivery_task_getter(
     env: gym.Env,
     return_to_center: bool = False,
 ):
+    """Get an abstract state evaluator to signal when the object has been delivered.
+    
+    Optionally, return_to_center requires the agent to return to the center square.
+    """
     task = env.unwrapped.task
     pattern = r"Deliver a (\w+) (\w+) to tile \((\d+), (\d+)\)\."
     matches = re.search(pattern, task)
@@ -77,12 +81,17 @@ def object_delivery_task_getter(
 def random_object_center_task_getter(
     obs: Observation, abstract: GridAbstraction, env: gym.Env
 ):
+    """Curry object_delivery_task_getter with return_to_center=True."""
     return object_delivery_task_getter(obs, abstract, env, return_to_center=True)
 
 
 def pickup_object_task_getter(
     obs: Observation, abstract: GridAbstraction, env: gym.Env, strict=False
 ):
+    """Get an abstract state evaluator to signal when the task object has been picked up.
+    
+    Optionally, strict signals failure if the wrong object is picked up.
+    """
     task = env.unwrapped.task
     color_name = extract_feature_from_mission_text(task, COLOR_NAMES)
     color_idx = get_color_id(color_name)
@@ -107,14 +116,16 @@ def pickup_object_task_getter(
 def pickup_object_strict_task_getter(
     obs: Observation, abstract: GridAbstraction, env: gym.Env
 ):
+    """Curry pickup_object_task_getter with strict=True."""
     return pickup_object_task_getter(obs, abstract, env, strict=True)
 
 
 def infer_task_goal(obs, abstract, _env):
+    """For multitask environments, infer the type of task from the minigrid environment."""
     goal_fn = COCOGRID_ABSTRACT_GOALS[type(_env.unwrapped.minigrid.unwrapped)]
     return goal_fn(obs, abstract, _env)
 
-
+# Register default tasks for environments.
 COCOGRID_ABSTRACT_GOALS: Dict[MiniGridEnv, Callable] = {
     envs.FetchEnv: pickup_object_strict_task_getter,
     envs.KeyCorridorEnv: pickup_object_task_getter,

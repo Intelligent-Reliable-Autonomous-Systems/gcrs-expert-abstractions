@@ -1,11 +1,12 @@
 from functools import partial
 
-# from minimujo.state.grid_abstraction import get_minimujo_goal_wrapper
 from gcrs.goal.grid_planning import construct_grid_goal_wrapper
-from gcrs.goal.object_abstraction import (
-    get_object_abstraction_goal_wrapper
+from gcrs.goal.room_planning import get_room_abstraction_goal_wrapper
+from gcrs.goal.room_goal_wrapper import (
+    PBRSRoomGoalWrapper,
+    SubgoalRoomGoalWrapper,
+    RoomGoalWrapper,
 )
-from gcrs.goal.object_goal_wrapper import PBRSObjectGoalWrapper, SubgoalObjectGoalWrapper, SubgoalCostObjectGoalWrapper, SubgoalRewardOnlyObjectGoalWrapper, ObjectGoalWrapper
 from gcrs.goal.grid_goal_wrapper import (
     DistanceCostGoalWrapper,
     GoalWrapper,
@@ -36,16 +37,14 @@ grid_goal_wrappers = {
     "grid-subgoal-distance": SubgoalDistanceGoalWrapper,  # Give dense 'negative distance from subgoal' reward each step. Useful if training a subgoal-reaching policy.
 }
 
-# Wrappers using CocoGrid room/object abstraction.
+# Wrappers using CocoGrid room abstraction.
 object_abstraction_wrappers = {
-    "object-no-rew": ObjectGoalWrapper,
-    "object-pbrs": PBRSObjectGoalWrapper,
-    "object-pbrs-no-subgoal": PBRSObjectGoalWrapper,
-    "object-pos-pbrs": PBRSObjectGoalWrapper,
-    "object-pbrs-one-hot": PBRSObjectGoalWrapper,
-    "object-subgoal-achieve": SubgoalObjectGoalWrapper,
-    "object-subgoal-cost": SubgoalCostObjectGoalWrapper,
-    "object-subgoal-rew-only": SubgoalRewardOnlyObjectGoalWrapper,
+    "room-no-rew": RoomGoalWrapper, # Observe room abstract subgoals, but no reward shaping.
+    "room-pbrs": PBRSRoomGoalWrapper, # Use PBRS with room abstraction
+    "room-pbrs-no-subgoal": PBRSRoomGoalWrapper, # Give reward with PBRS, but don't observe subgoal.
+    "room-pos-pbrs": PBRSRoomGoalWrapper, # Include target position in observation with PBRS.
+    "room-pbrs-one-hot": PBRSRoomGoalWrapper, # PBRS, but one-hot encode the observed subgoal object/color IDs
+    "room-subgoal-achieve": SubgoalRoomGoalWrapper, # Give reward purely based on achieving the subgoal; rely on the planner's guidance.
 }
 
 
@@ -58,12 +57,12 @@ def wrap_env_with_goal(env, env_id, goal_version, gamma=1) -> GoalWrapper:
         if goal_version in object_abstraction_wrappers:
             goal_cls = object_abstraction_wrappers[goal_version]
             goal_cls = partial(goal_cls, gamma=gamma)
-            return get_object_abstraction_goal_wrapper(
+            return get_room_abstraction_goal_wrapper(
                 env,
                 env_id,
                 goal_cls,
                 one_hot=("one-hot" in goal_version),
-                use_pos=("object-pos" in goal_version),
+                use_pos=("room-pos" in goal_version),
                 observe_subgoal=("no-subgoal" not in goal_version),
             )
 

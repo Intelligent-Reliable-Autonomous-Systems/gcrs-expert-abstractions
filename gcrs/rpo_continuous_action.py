@@ -1,4 +1,5 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/rpo/#rpo_continuous_actionpy
+"""Train a Robust Policy Optimization continuous-control agent. This implementation is from CleanRL."""
+
 import os
 import random
 import time
@@ -37,11 +38,11 @@ class Args:
 
     exp_name: str = None
     """the name of this experiment"""
-    group_name: str = (None,)
+    group_name: str = None
     """the experiment group"""
-    log_dir: str = (None,)
+    log_dir: str = None
     """the base dir where the log dir will go. default: 'runs/'"""
-    video_dir: str = (None,)
+    video_dir: str = None
     """the base dir where the video dir will go. default: 'videos/'"""
     seed: int = 1
     """seed of the experiment"""
@@ -73,7 +74,7 @@ class Args:
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
-    gamma: float = 0.99
+    gamma: float = 0.999
     """the discount factor gamma"""
     gae_lambda: float = 0.95
     """the lambda for the general advantage estimation"""
@@ -115,7 +116,7 @@ if __name__ == "__main__":
     args.minibatch_size = int(args.batch_size // args.num_minibatches)
     args.num_iterations = args.total_timesteps // args.batch_size
 
-    short_env = args.env_id.removeprefix("Minimujo-").removesuffix("-v0")
+    short_env = args.env_id.removeprefix("cocogrid/").removesuffix("-v0")
     if args.exp_name is None:
         run_name = f"rpo__{short_env}__{args.seed}__{int(time.time())}"
     else:
@@ -177,7 +178,7 @@ if __name__ == "__main__":
         log_params = {
             "writer": writer,
             "max_steps": args.num_steps,
-            "prefix": "minimujo",
+            "prefix": "cocogrid",
         }
     envs = gym.vector.SyncVectorEnv(
         [

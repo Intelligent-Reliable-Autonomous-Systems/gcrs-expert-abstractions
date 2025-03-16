@@ -1,39 +1,67 @@
+"""This module is a utility to manually control an environment."""
+
 if __name__ == "__main__":
-    import gymnasium as gym
     from gymnasium.wrappers.human_rendering import HumanRendering
-    import numpy as np
     from pygame import key
     import pygame
     from gcrs.goal import wrap_env_with_goal
 
     import argparse
-    from cocogrid.utils.testing import add_cocogrid_arguments, args_to_gym_env, get_pygame_action
-    import cocogrid
+    from cocogrid.utils.testing import (
+        add_cocogrid_arguments,
+        args_to_gym_env,
+        get_pygame_action,
+    )
+
     parser = argparse.ArgumentParser()
-    add_cocogrid_arguments(parser, env='cocogrid/DoorKey-6x6-v0', walker='box2d', scale=3, timesteps=600, include_seed=True)
-    parser.add_argument("--goal", "-g", type=str, default="pbrs", help="Goal wrapper version")
+    add_cocogrid_arguments(
+        parser,
+        env="cocogrid/DoorKey-6x6-v0",
+        agent="box2d",
+        scale=3,
+        timesteps=600,
+        include_seed=True,
+    )
+    parser.add_argument(
+        "--goal", "-g", type=str, default="grid-pbrs", help="Goal wrapper version"
+    )
     parser.add_argument("--gamma", type=float, default=1, help="discount factor")
     parser.add_argument("--print-reward", action="store_true", help="Print reward")
     parser.add_argument("--print-obs", action="store_true", help="Print observation")
     parser.add_argument("--print-goal", action="store_true", help="Print goal")
     parser.add_argument("--print-abstract", action="store_true", help="Print abstract")
+    parser.add_argument(
+        "--print-logs", action="store_true", help="Wrap in logger and print to console"
+    )
     args = parser.parse_args()
-    
+
     env_id = args.env
     env = args_to_gym_env(args)
     env.unwrapped.render_width = 480
     env.unwrapped.render_height = 480
 
-    goal_env = wrap_env_with_goal(env, env_id, args.goal, gamma=args.gamma)
-    
-    env = HumanRendering(goal_env)
+    env = goal_env = wrap_env_with_goal(env, env_id, args.goal, gamma=args.gamma)
 
-    print('Controls: Move with WASD, grab with Space')
+    if args.print_logs:
+        from cocogrid.utils.logging import LoggingWrapper, CocogridLogger
+        from cocogrid.utils.logging.tensorboard import MockSummaryWriter
+        from gcrs.utils.logging import SubgoalLogger
+
+        env = LoggingWrapper(
+            goal_env, summary_writer=MockSummaryWriter(), raise_errors=True
+        )
+        env.subscribe_metric(CocogridLogger())
+        env.subscribe_metric(SubgoalLogger())
+
+    env = HumanRendering(env)
+
+    print("Controls: Move with WASD, grab with Space")
 
     obs, _ = env.reset()
-    # breakpoint()
 
-    print(f'Env has observation space {env.unwrapped.observation_space} and action space {env.unwrapped.action_space}')
+    print(
+        f"Env has observation space {env.observation_space} and action space {env.action_space}"
+    )
     print(f"Current task: {env.unwrapped.task}")
 
     num_steps = 0
@@ -45,8 +73,8 @@ if __name__ == "__main__":
     while True:
         keys = key.get_pressed()
         if keys[pygame.K_ESCAPE]:
-            print('Cumulative reward (to this point):', reward_sum)
-            print('Manually terminated')
+            print("Cumulative reward (to this point):", reward_sum)
+            print("Manually terminated")
             break
         if keys[pygame.K_r] and not is_holding_reset:
             trunc = True
@@ -66,12 +94,10 @@ if __name__ == "__main__":
 
             if args.print_reward:
                 if rew != 0:
-                    print('reward:', rew)
+                    print("reward:", rew)
 
             if args.print_obs:
-                print('obs:', obs.astype(int))
-
-            # print(obs[-26:-21], obs[-21:-15], obs[-15:-10], obs[-10:-4], obs[-4:])
+                print("obs:", obs.astype(int))
 
             if args.print_goal:
                 print(goal_env.subgoal)
@@ -79,12 +105,15 @@ if __name__ == "__main__":
             if args.print_abstract:
                 print(goal_env.abstract_state)
 
-            # print(len(goal_env._planner.plan))
-            
         if term or trunc:
-            trunc_or_term = 'Truncated' if trunc else 'Terminated'
-            print('Cumulative reward:', reward_sum, 'cumulative return:', cum_return)
-            print(f'{trunc_or_term} after {num_steps} steps')
+            trunc_or_term = "Truncated" if trunc else "Terminated"
+            if args.gamma == 1:
+                print("Cumulative reward: {reward_sum:.2f}")
+            else:
+                print(
+                    f"Cumulative reward: {reward_sum:.2f} | Cumulative return: {cum_return:.2f}"
+                )
+            print(f"{trunc_or_term} after {num_steps} steps")
             num_episodes += 1
             env.reset()
             reward_sum = 0

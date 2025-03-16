@@ -1,10 +1,11 @@
 from dataclasses import dataclass
-from typing import Any, Callable, SupportsFloat
+from typing import Callable
 
+from cocogrid.utils.logging import LoggingWrapper, CocogridLogger
 import gymnasium as gym
 import numpy as np
-from cocogrid.utils.logging import LoggingWrapper, CocogridLogger
 
+from gcrs.goal import wrap_env_with_goal
 from gcrs.utils.recording import RecordVideo
 from gcrs.utils.logging import SubgoalLogger
 
@@ -23,23 +24,38 @@ class CocoGridEnv:
     """How big should the render be?"""
 
 
-def make_cocogrid_env(
-    env_id,
-    idx,
-    capture_video,
-    run_name,
-    gamma,
-    env_kwargs={},
+def get_cocogrid_env_constructor(
+    env_id: str,
+    idx: int,
+    capture_video: bool,
+    run_name: str,
+    gamma: float,
+    env_kwargs: dict = {},
     logging_params=None,
     video_dir=None,
-    goal_version="dense-v1",
+    goal_version="no-goal",
     reward_scale=1,
     norm_obs=False,
     norm_reward=False,
     is_eval=False,
 ):
-    from gcrs.goal import wrap_env_with_goal
+    """Get a function that constructs a cocogrid environment.
 
+    Input:
+    env_id: the environment id.
+    idx: for a vectorized environment, which index is this environment.
+    capture_video: whether to wrap in a VideoWrapper.
+    run_name: the experiment run unique identifier for video storage location.
+    gamma: the reward discount factor.
+    env_kwargs: keyword arguments to be passed into cocogrid.
+    logging_params: optional parameters used to construct a logging wrapper.
+    video_dir: optionally specify the specific directory to log videos
+    goal_version: the identifier of which subgoal planner to wrap.
+    reward_scale: a factor to scale the reward
+    norm_obs: whether to wrap NormalizeObservation.
+    norm_reward: whether to wrap NormalizeReward.
+    is_eval: whether the environment is used for evaluation (rather than training).
+    """
     if video_dir is None:
         video_dir = f"videos/{run_name}"
     video_prefix = "eval" if is_eval else "train"
@@ -53,7 +69,8 @@ def make_cocogrid_env(
         else None
     )
 
-    def thunk():
+    def construct_cocogrid_env():
+        """Construct a CocoGrid environment and wrap it with video, goal planning, logging, and transformations."""
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array", **env_kwargs)
             env = wrap_env_with_goal(env, env_id, goal_version, gamma)
@@ -92,22 +109,21 @@ def make_cocogrid_env(
                 standard_label=logging_params["prefix"],
                 is_eval=is_eval,
             )
-            # for logger in get_minimujo_heatmap_loggers(env, gamma=0.99):
-            #     logger.label = f'{logging_params["prefix"]}_{logger.label}'.lstrip('_')
-            #     env.subscribe_metric(logger)
             prefix = logging_params["prefix"]
             env.subscribe_metric(CocogridLogger(prefix))
             env.subscribe_metric(SubgoalLogger(prefix))
         return env
 
-    return thunk
+    return construct_cocogrid_env
 
 
 def get_environment_constructor_for_id(env_id: str) -> Callable:
+    """Determine and construct the appropriate environment."""
     if is_cocogrid_env(env_id):
-        return make_cocogrid_env
+        return get_cocogrid_env_constructor
     raise ValueError(f"No environment constructor defined for {env_id}.")
 
 
 def is_cocogrid_env(env_id: str) -> bool:
+    """Get whether an environment id is associated with CocoGrid."""
     return env_id.lower().startswith("cocogrid")
