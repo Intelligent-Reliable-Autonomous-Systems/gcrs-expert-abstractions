@@ -15,7 +15,6 @@ from gcrs.goal.grid_goal_wrapper import (
     SubgoalDistanceGoalWrapper,
     SubgoalGoalWrapper,
 )
-from gcrs.env import is_cocogrid_env
 
 # Wrappers using cococgrid grid abstraction
 grid_goal_wrappers = {
@@ -52,7 +51,8 @@ def wrap_env_with_goal(env, env_id, goal_version, gamma=1) -> GoalWrapper:
     """Wrap a gymnasium environment with a goal wrapper, to augment observations and rewards with high-level planning."""
     if goal_version == "no-goal" or goal_version == "":
         return env
-
+    
+    from gcrs.env import is_cocogrid_env
     if is_cocogrid_env(env_id):
         if goal_version in object_abstraction_wrappers:
             goal_cls = object_abstraction_wrappers[goal_version]

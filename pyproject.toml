@@ -36,3 +36,7 @@ dependencies = [
     "rich <12.0",
     "tyro >=0.5.10"
 ]
+
+[build-system]
+requires = ["hatchling", "swig"]
+build-backend = "hatchling.build"
